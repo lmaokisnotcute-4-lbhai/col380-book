@@ -1,0 +1,287 @@
+\chapter{Lecture 7: OpenMP Scheduling Strategies, Reduction, and Performance Optimisation}
+\noindent\textit{Transcribed by Devanshi Malik (2022CS51142)}
+\section{Work Sharing Constructs in OpenMP}
+
+This lecture continued the discussion on OpenMP and focused on work sharing
+constructs, particularly the \texttt{for} construct. In OpenMP, loop iterations
+are divided among threads, and the scheduling strategy determines how this
+division is performed.
+
+The scheduling strategy can either be explicitly specified by the programmer
+or left to the runtime system. In some cases, expert programmers may choose an
+appropriate strategy manually, while in others the runtime system makes the
+decision.
+
+\subsection{Static Scheduling}
+
+In static scheduling, iterations are divided among threads before execution
+begins. The assignment is fixed and typically follows a round-robin or block
+distribution. Each thread is assigned a chunk of iterations, where the chunk
+size determines how many iterations are grouped together.
+
+Static scheduling works well when:
+\begin{itemize}
+  \item The workload per iteration is uniform.
+  \item The iteration space and workload are known in advance.
+\end{itemize}
+
+However, static scheduling does not adapt during execution and cannot respond
+to load imbalance if different iterations take different amounts of time.
+
+\subsection{Dynamic Scheduling}
+
+In dynamic scheduling, iterations are assigned to threads on demand. A thread
+requests a new chunk of work once it finishes its current chunk. This allows
+better load balancing when iteration workloads are uneven.
+
+Dynamic scheduling introduces additional runtime overhead due to coordination
+and synchronization. However, it can significantly reduce idle time when the
+workload per iteration is irregular, since threads only request new work when
+they become idle.
+
+\subsection{Guided Scheduling}
+
+Guided scheduling is similar to dynamic scheduling, but the chunk size decreases
+over time. Initially, large chunks are assigned to reduce scheduling overhead,
+and as execution progresses, the chunk size becomes smaller. This strategy
+attempts to balance the trade-off between scheduling overhead and load
+balancing.
+The following examples from the lecture slides illustrate the use of different
+OpenMP scheduling strategies for loop iteration spaces.
+
+\begin{ppexample}
+The following examples illustrate how different OpenMP scheduling strategies
+control the assignment of loop iterations to threads.
+\end{ppexample}
+
+\begin{ppprogram}{Static scheduling with fixed chunk size}{prog:omp-static}
+\begin{lstlisting}[language=OpenMP]
+#pragma omp parallel for schedule(static, chunk_size)
+for (int i = 0; i < N; i++) {
+  do_stuff();  // e.g., a[i] += b[i]
+}
+\end{lstlisting}
+\end{ppprogram}
+
+Static scheduling assigns iterations in advance, typically in a round-robin
+manner, and works well when the workload per iteration is uniform.
+
+\begin{ppprogram}{Dynamic scheduling with on-demand assignment}{prog:omp-dynamic}
+\begin{lstlisting}[language=OpenMP]
+#pragma omp parallel for schedule(dynamic, chunk_size)
+for (int i = 0; i < N; i++) {
+  do_stuff();  // e.g., a[i] += b[i]
+}
+\end{lstlisting}
+\end{ppprogram}
+
+Dynamic scheduling incurs higher runtime overhead but provides better load
+balancing when iteration costs vary.
+
+
+\section{Reduction Operations}
+
+Reduction operations combine values produced by multiple threads into a single
+result using an associative operator such as addition or multiplication.
+
+Common reduction operators include:
+\[
++, \times, \min, \max, \land, \lor
+\]
+
+Reduction operations help avoid data races that would otherwise occur when
+multiple threads update a shared variable. Instead of manually using atomic
+operations or critical sections, OpenMP provides built-in support for reductions.
+
+Reduction operators are typically associative and commutative. Although multiple
+reduction clauses may appear in a program, each reduction clause specifies a
+single operator applied to a particular variable.
+The following example demonstrates the use of a reduction clause to safely
+accumulate values across threads.
+
+\begin{ppexample}
+OpenMP reductions provide a concise way to avoid data races when combining
+values computed by multiple threads.
+\end{ppexample}
+
+\begin{ppprogram}{Reduction for summation}{prog:omp-reduction}
+\begin{lstlisting}[language=OpenMP]
+double sum = 0.0;
+
+#pragma omp parallel for reduction(+:sum)
+for (int i = 0; i < N; i++)
+  sum += a[i];
+\end{lstlisting}
+\end{ppprogram}
+
+\begin{pppitfall}
+Reductions avoid races on the reduced variable, but they do not automatically
+make all code correct. Shared data structures, I/O operations, and
+non-associative floating-point computations may still require careful handling.
+\end{pppitfall}
+
+
+
+\section{Sections Construct and Task-Based Parallelism}
+
+The \texttt{sections} construct enables task-based parallelism in OpenMP.
+Different sections correspond to different tasks, and each section is executed
+by exactly one thread.
+
+Key properties of the \texttt{sections} construct include:
+\begin{itemize}
+  \item Each section is executed exactly once.
+  \item There is an implicit barrier at the end of the \texttt{sections} region.
+  \item The assignment of sections to threads is determined at runtime.
+\end{itemize}
+
+The order in which sections are executed is unspecified. Although sections may
+execute in parallel, there is no guarantee that all sections will do so
+simultaneously. If sections modify shared data, explicit synchronization is
+required to ensure correctness.
+The \texttt{sections} construct can be used to express task-based parallelism, as
+shown in the following example from the lecture slides.
+
+\begin{ppexample}
+The \texttt{sections} construct enables task-based parallelism by assigning
+different tasks to different threads.
+\end{ppexample}
+
+\begin{ppprogram}{Task parallelism using sections}{prog:omp-sections}
+\begin{lstlisting}[language=OpenMP]
+#pragma omp parallel
+{
+  #pragma omp sections
+  {
+    #pragma omp section
+    { compute_A(); }
+
+    #pragma omp section
+    { compute_B(); }
+
+    #pragma omp section
+    { compute_C(); }
+  } // implicit barrier at end of sections (unless nowait)
+}
+\end{lstlisting}
+\end{ppprogram}
+
+
+\section{Performance Optimisation Tips}
+
+Thread creation and context management introduce overheads. If the iteration
+space is small, the overhead of parallel execution may outweigh its benefits,
+leading to slower execution.
+
+False sharing can occur when multiple threads frequently access independent
+variables that reside on the same cache line. Padding data structures can help
+separate such variables across cache lines and reduce performance degradation.
+
+Choosing an appropriate scheduling strategy is crucial. Programmers should
+consider workload regularity, iteration dependencies, and chunk sizes when
+designing parallel loops.
+
+Synchronization should be minimized whenever possible. Some parallel regions
+contain implicit barriers that may lead to unnecessary synchronization.
+Carefully using clauses such as \texttt{nowait} can help reduce this overhead
+when synchronization is not required.
+
+The lecture also highlighted the use of the \texttt{nowait} clause to avoid
+unnecessary synchronization barriers when it is safe to do so.
+
+\begin{ppexample}
+The \texttt{nowait} clause can be used to eliminate unnecessary synchronization
+when it is safe to do so.
+\end{ppexample}
+
+\begin{ppprogram}{Avoiding unnecessary barriers with nowait}{prog:omp-nowait}
+\begin{lstlisting}[language=OpenMP]
+#pragma omp parallel
+{
+  #pragma omp for nowait
+  for (int i = 0; i < n; i++) {
+    process_part1(i);
+  }
+
+  #pragma omp for
+  for (int i = 0; i < n; i++) {
+    process_part2(i);
+  }
+}
+\end{lstlisting}
+\end{ppprogram}
+
+
+
+If the iteration space size is sufficiently large (for example, on the order of
+$10^{4}$ to $10^{5}$ iterations or more), parallelization is more likely to be
+beneficial. For smaller iteration spaces, parallel overheads may dominate and
+mask any performance gains.
+
+Important design considerations include:
+\begin{itemize}
+  \item Workload regularity, which influences the choice between static,
+        dynamic, and guided scheduling.
+  \item Appropriate selection of chunk size based on the number of threads.
+\end{itemize}
+
+These design decisions often depend on the programmer’s experience and the
+specific characteristics of the workload.
+
+\section{SIMD Vectorisation}
+
+Some computations can be accelerated using SIMD (Single Instruction, Multiple
+Data) vector instructions, where a single instruction operates on multiple data
+elements simultaneously. When applicable, vectorisation can significantly
+improve performance.
+
+Vectorisation is generally unsafe or ineffective when:
+\begin{itemize}
+  \item There are loop-carried dependencies.
+  \item Memory accesses are poorly aligned.
+  \item The loop contains complex control flow or branching.
+\end{itemize}
+The following example shows how the compiler can be explicitly guided to
+vectorize a loop using OpenMP SIMD directives.
+
+\begin{ppexample}
+The compiler can be explicitly guided to vectorize loops using OpenMP SIMD
+directives.
+\end{ppexample}
+
+\begin{ppprogram}{SIMD vectorisation of a loop}{prog:omp-simd}
+\begin{lstlisting}[language=OpenMP]
+#pragma omp parallel for simd
+for (int i = 0; i < n; i++) {
+  result[i] = a[i] + b[i] * c[i];
+}
+\end{lstlisting}
+\end{ppprogram}
+
+\begin{ppprogram}{Increasing parallelism using collapse}{prog:omp-collapse}
+\begin{lstlisting}[language=OpenMP]
+#pragma omp parallel for collapse(2)
+for (int i = 0; i < 100; i++) {
+  for (int j = 0; j < 100; j++) {
+    matrix[i][j] = compute(i, j);
+  }
+}
+\end{lstlisting}
+\end{ppprogram}
+
+
+Common loop optimisation techniques include:
+\begin{itemize}
+  \item \emph{Loop fusion}, which reduces loop overhead and improves
+        instruction-level parallelism. The \texttt{collapse} clause can be used
+        to combine nested loops into a single iteration space when appropriate.
+  \item \emph{Loop unrolling}, which reduces loop-control overhead and can
+        improve cache utilization by fetching data in bursts.
+  \item Avoiding the use of locks inside loops whenever possible.
+  \item Avoiding memory allocation inside parallel regions.
+\end{itemize}
+
+Determining the optimal unrolling factor often requires experimentation.
+Programmers may profile performance to identify cases where threads spend
+significant time idle while waiting for new work, and adjust unrolling
+accordingly.
