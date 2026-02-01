@@ -1,0 +1,199 @@
+\chapter{Lecture 8: OpenMP Tasks and Memory Consistency Models}
+
+\noindent\textit{Transcribed by Devanshi Malik (2022CS51142)}
+
+\section{Recap: Work Sharing Constructs --- Sections}
+
+The lecture began with a recap of the \texttt{sections} work sharing construct in
+OpenMP. Each section is executed exactly once by a single thread, and the
+assignment of sections to threads is determined dynamically at runtime. An
+implicit barrier exists at the end of the \texttt{sections} construct unless the
+\texttt{nowait} clause is specified. Only one thread is executing a task at a
+time, rest all are waiting.
+
+Sections are useful for coarse-grained task parallelism such as pipelining,
+overlapping I/O and computation, and divide-and-conquer algorithms.
+
+\medskip
+
+\section{Work Sharing Constructs: Tasks}
+
+The \texttt{task} construct provides a more flexible mechanism for expressing
+parallelism. When a thread encounters a \texttt{task} directive, it creates a
+task and places it in a task pool. Tasks may be executed by any available thread
+in the parallel region.
+
+The thread that generates the task in the task pool, if done with it, can
+continue to execute some other task.
+
+Unlike most work sharing constructs, there is no implicit barrier at the end of
+a task construct, allowing task creation and execution to proceed independently.
+
+\begin{ppprogram}{Creating tasks dynamically}{prog:omp-task-basic}
+\begin{lstlisting}[language=OpenMP]
+#pragma omp parallel
+{
+  #pragma omp single
+  {
+    #pragma omp task
+    do_work_1();
+
+    #pragma omp task
+    do_work_2();
+  }
+}
+\end{lstlisting}
+\end{ppprogram}
+
+The thread that creates a task does not necessarily execute it.
+
+\medskip
+
+\section{Example: Linked List Traversal with Tasks}
+
+Linked list traversal is inherently sequential due to pointer dependencies.
+However, once a node is reached, its associated computation can be offloaded as a
+task.
+
+\begin{ppprogram}{Task creation during linked list traversal}{prog:omp-task-list}
+\begin{lstlisting}[language=OpenMP]
+#pragma omp parallel
+{
+  #pragma omp single
+  {
+    node *p = head;
+    while (p != NULL) {
+      #pragma omp task firstprivate(p)
+      process_node(p);
+      p = p->next;
+    }
+  }
+}
+\end{lstlisting}
+\end{ppprogram}
+
+The \texttt{firstprivate(p)} clause makes sure that each time a task is created,
+\texttt{p} is localised and given the value which was originally given to
+\texttt{p} by the master thread.
+
+Each task has a different value of \texttt{p}, stored in the thread-local context
+of that task. Each iteration of the while loop is created as a new task.
+
+Since the order of the tasks is not preserved, it is not good for computations
+having cross iteration dependencies.
+
+Even if the complete execution of \texttt{process\_node(p)} is not done, the
+master thread keeps running the \texttt{p = p->next} iteration in the while loop.
+
+\medskip
+
+\section{Exercise: Recursive Fibonacci with Tasks}
+
+An in-class exercise demonstrated task parallelism using a recursive Fibonacci
+computation. Tasks are created for recursive calls, and a \texttt{taskwait}
+directive ensures that child tasks complete before results are combined.
+
+\begin{ppprogram}{Recursive Fibonacci using tasks}{prog:omp-fib}
+\begin{lstlisting}[language=OpenMP]
+int fib(int n) {
+  int x, y;
+  if (n < 2) return n;
+
+  #pragma omp task shared(x)
+  x = fib(n - 1);
+
+  #pragma omp task shared(y)
+  y = fib(n - 2);
+
+  #pragma omp taskwait
+  return x + y;
+}
+\end{lstlisting}
+\end{ppprogram}
+
+The master thread creates \texttt{fib(n-1)} and \texttt{fib(n-2)} and is free
+then. It can now pick either \texttt{fib(n-1)} or \texttt{fib(n-2)}.
+
+Whichever thread picks up the \texttt{fib(n-1)} task goes on to further create
+\texttt{fib(n-2)}, \texttt{fib(n-3)}, and so on.
+
+This example highlights the importance of task granularity, as excessive task
+creation can lead to overhead dominating useful computation.
+
+\medskip
+
+\section{Memory Consistency Models}
+
+A memory consistency model is a defined set of rules governing how memory
+operations on shared variables become visible to different threads.
+
+Consistency models specify the allowed orderings of reads and writes across
+multiple memory locations. This differs from coherence, which concerns a single
+memory location.
+
+\medskip
+
+\section{Linearisability}
+
+Linearisability is the strongest memory consistency model discussed and is the
+most expensive to implement. Each operation appears to take effect
+instantaneously at some point between its invocation and response, known as the
+linearization point.
+
+\begin{ppprogram}{Concurrent reads and writes to a shared register}{prog:linear-reg}
+\begin{lstlisting}
+Thread 1: write(X = 1) -----------|
+                                  |--> linearization point
+Thread 2: read(X) ----------------|
+\end{lstlisting}
+\end{ppprogram}
+
+If one operation completes before another begins in real time, this order must
+be preserved in the global history.
+
+Class example: You have 5 threads and 5 instructions (25 total operations). The
+number of valid schedules that preserve intra-thread ordering is
+\[
+\frac{25!}{(5!)^5}.
+\]
+
+\medskip
+
+\section{Visualizing Linearisability}
+
+When operations overlap in time, their linearization points may be ordered in
+multiple valid ways. However, histories in which a read observes a value written
+in the future or violates real-time constraints are not linearisable.
+
+The slides illustrated both valid and invalid execution histories using shared
+register examples.
+
+Slide number 10 of this lecture showed one of the invalid sequential histories of
+the example instruction set. Since one cannot write in the past or read from a
+future write, this makes it a non-linearisable history.
+
+Overall, the outcome of the sequentialised order (when the partial order is
+sequentialised) should match the original order of operations. The invocation
+time and the response time must be mandatorily respected.
+
+\medskip
+
+\section{Realizing Linearisability in Practice}
+
+Achieving linearisability often requires expensive synchronization mechanisms,
+such as memory barriers or consensus protocols. In distributed systems,
+algorithms such as Paxos and Raft are commonly used to ensure linearisable
+behavior.
+
+Verifying linearisability requires identifying valid linearization points and
+showing that all executions correspond to legal sequential histories.
+
+\medskip
+
+\section{Summary}
+
+This lecture introduced task-based parallelism in OpenMP and the fundamentals of
+memory consistency models. Tasks enable dynamic parallelism but require careful
+handling of shared data and task granularity. Memory consistency models, in
+particular linearisability, provide a rigorous framework for reasoning about
+correctness in concurrent systems.
